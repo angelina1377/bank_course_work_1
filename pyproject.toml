@@ -11,13 +11,17 @@ dependencies = [
     "pandas>=3.0.1,<4.0.0",
     "openpyxl>=3.1.5,<4.0.0",
     "requests>=2.32.5,<3.0.0",
-    "dotenv (>=0.9.9,<0.10.0)"
+    "python-dotenv>=1.0.1,<2.0.0"
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=9.0.2,<10.0.0",
-    "flake8>=7.3.0,<8.0.0"
+    "flake8>=7.3.0,<8.0.0",
+    "pytest-cov>=6.0.0,<7.0.0",
+    "black>=25.0.0,<26.0.0",
+    "isort>=6.0.0,<7.0.0",
+    "mypy>=1.15.0,<2.0.0"
 ]
 
 [build-system]
@@ -26,4 +30,35 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 package-mode = false
+
+[tool.black]
+line-length = 88
+target-version = ["py314"]
+exclude = '''
+/(
+    \.git
+  | \.venv
+  | build
+  | dist
+  | \.idea
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 88
+skip = [".venv", ".idea", "build", "dist"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+exclude = "(^tests/|^\\.venv/|^\\.idea/)"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=80"
 
