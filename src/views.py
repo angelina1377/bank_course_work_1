@@ -1,137 +1,130 @@
-import pandas as pd # Для работы с данными
-import json # Для работы с JSON
-from datetime import datetime # Для работы с датами
-import requests # Для HTTP-запросов
-from dotenv import load_dotenv # Для работы с переменными окружения
-import os # Для работы с операционной системой
-from services import load_excel_data, calculate_period # Импортируем функции из services.py
-import logging # Для логирования действий программы
+"""Помощники по подготовке интеграции."""
 
-load_dotenv() # Загружаем переменные окружения из .env файла
+from __future__ import annotations
 
-# Функции работы с настройками пользователя
-# Кешируем чтение настроек пользователя(избегает повторного чтения файла при каждом вызове)
-def get_user_settings():
-    if not hasattr(get_user_settings, 'cache'): # Проверяет, есть ли у функции атрибут cache (был ли файл уже прочитан)
-        with open('user_settings.json') as f: # Если нет — открывает файл и сохраняет его содержимое
-            get_user_settings.cache = json.load(f)
+import json
+import logging
+import os
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import requests
+
+from services import calculate_period, load_excel_data
+
+LOGGER = logging.getLogger(__name__)
+
+DATE_COLUMN = "Дата операции"
+AMOUNT_COLUMN = "Сумма операции"
+CATEGORY_COLUMN = "Категория"
+SETTINGS_PATH = Path("user_settings.json")
+
+
+def get_user_settings() -> dict[str, Any]:
+    """Считывание и кэширование настроек из json."""
+    if not hasattr(get_user_settings, "cache"):
+        with SETTINGS_PATH.open(encoding="utf-8") as file_obj:
+            get_user_settings.cache = json.load(file_obj)
     return get_user_settings.cache
 
-# Функция работы с настройками пользователя
-def get_user_currencies():
-    """Получаем список валют пользователя из настроек"""
-    settings = get_user_settings()
-    return settings.get('user_currencies', [])
-# берёт значение по ключу user_currencies, если ключа нет — возвращает пустой список
 
-def get_user_stocks():
-    """Получаем список акций пользователя из настроек"""
-    settings = get_user_settings()
-    return settings.get('user_stocks', [])
+def get_user_currencies() -> list[str]:
+    """Возвращает валюты пользователя."""
+    return list(get_user_settings().get("user_currencies", []))
 
-# Функции работы с API
-def get_currency_rates():
-    """Получаем актуальные курсы валют"""
-    api_key = os.getenv('CURRENCY_API_KEY')
-    url = f'https://api.exchangerate-api.com/v4/latest/RUB'
+
+def get_user_stocks() -> list[str]:
+    """Возвращает акции пользователя."""
+    return list(get_user_settings().get("user_stocks", []))
+
+
+def get_currency_rates() -> list[dict[str, float | str]]:
+    """Получаем актуальные курсы валют."""
+    url = "https://api.exchangerate-api.com/v4/latest/RUB"
     try:
-        response = requests.get(url) # Делаем get запрос
-        response.raise_for_status() # Проверяем успешность запроса
-        data = response.json() # Парсим ответ в json
-        rates = [] # Создаем пустой список для курсов
-        # Проходим по всем валютам из настроек пользователя
-        for currency in get_user_currencies():
-            try:
-                rates.append({
-                    "currency": currency,
-            "rate": round(data['rates'][currency], 2)
-        })
-            except KeyError:
-                logging.warning(f"Валюта {currency} не найдена в ответе API")
-        return rates
-    except requests.RequestException as e:
-        logging.error(f"Ошибка при получении курсов валют: {e}")
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        rates_data = response.json().get("rates", {})
+    except requests.RequestException as exc:
+        LOGGER.error("Ошибка при получении курсов валют: %s", exc)
         return []
 
-def get_stock_prices():
-    api_key = os.getenv('STOCK_API_KEY') # Получаем API ключ
-    base_url = 'https://api.polygon.io/v2/last/stock/'  # Базовый URL
-    prices = []
-    try:
-        for stock in get_user_stocks(): # Прохожим по все акциям пользователя
-            response = requests.get(
-                f"{base_url}{stock}/quotes",
-                params={'apiKey': api_key}
-            )
+    rates: list[dict[str, float | str]] = []
+    for currency in get_user_currencies():
+        if currency not in rates_data:
+            LOGGER.warning("Валюта %s не найдена в ответе API", currency)
+            continue
+        rates.append({"currency": currency, "rate": round(float(rates_data[currency]), 2)})
+    return rates
+
+
+def get_stock_prices() -> list[dict[str, float | str]]:
+    """Получаем цены акций."""
+    api_key = os.getenv("STOCK_API_KEY", "")
+    base_url = "https://api.polygon.io/v2/last/stock"
+    prices: list[dict[str, float | str]] = []
+
+    for stock in get_user_stocks():
+        try:
+            response = requests.get(f"{base_url}/{stock}", params={"apiKey": api_key}, timeout=10)
             response.raise_for_status()
             data = response.json()
-            try:
-                prices.append({
-            "stock": stock,
-            "price": round(data['last']['price'], 2)
-        })
-            except KeyError:
-                logging.warning(f"Не удалось получить цену для акции {stock}")
-        return prices
-    except requests.RequestException as e:
-        logging.error(f"Ошибка при получении цен акций: {e}")
-        return []
+        except requests.RequestException as exc:
+            LOGGER.error("Ошибка при получении цены акции %s: %s", stock, exc)
+            continue
 
-# Функция обработки транзакций
-def process_expenses(df):
-    total_amount = round(df['Сумма операции'].sum() * -1) # умножаем на -1, чтобы получить положительное число
-    # Группируем расходы по категориям
-    category_groups = df.groupby('Категория')['Сумма операции'].sum().apply(lambda x: round(x * -1))
-    # Берем 7 основных категорий
-    main_categories = category_groups.nlargest(7).to_dict()
-    # Если категорий больше 7, создаем категорию "Остальное"
-    if len(main_categories) > 7:
-        # Получаем все категории, которых нет в main_categories
-        other_categories = category_groups.drop(main_categories.keys())
-        # Суммируем их значения
-        rest_amount = other_categories.sum()
-        main_categories["Остальное"] = round(rest_amount)
-    # Формируем список основных категорий
-    main = [{"category": cat, "amount": amount} for cat, amount in main_categories.items()]
-    # Фильтруем переводы и наличные
-    transfers_cash = df[df['Категория'].isin(['Наличные', 'Переводы'])]
-    transfers_cash_groups = transfers_cash.groupby('Категория')['Сумма операции'].sum().apply(
-        lambda x: round(x * -1)
-    ).to_dict()
-    # Формируем список переводов и наличных
-    transfers_and_cash = [{"category": cat, "amount": amount} for cat, amount in transfers_cash_groups.items()]
-    return {
-        "total_amount": total_amount,
-        "main": main,
-        "transfers_and_cash": transfers_and_cash
-    }
+        price = data.get("results", {}).get("p")
+        if price is None:
+            LOGGER.warning("Не удалось получить цену для акции %s", stock)
+            continue
 
-# Функция обработки доходов
-def process_income(df):
-    total_amount = round(df["Сумма операции"].sum())
-    # Группируем доходы по категориям
-    category_groups = df.groupby("Категория")['Сумма операции'].sum().apply(lambda x: round(x))
-    # Берем 3 основные категории доходов
-    main_categories = category_groups.nlargest(3).to_dict()
-    # Формируем список основных категорий
-    main = [{"category": cat, "amount": amount} for cat, amount in main_categories.items()]
-    return {
-        "total_amount": total_amount,
-        "main": main
-    }
+        prices.append({"stock": stock, "price": round(float(price), 2)})
+    return prices
 
-# Функция получения данных по событиям
-def get_events_data(date_str, period='M'):
-    df = load_excel_data() # Загружаем данные из Excel
-    start_date, end_date = calculate_period(date_str, period) # Рассчитываем период
-    # Фильтруем данные по дате
-    filtered_df = df[(df['Дата операции'] >= start_date) & (df['Дата операция'] <= end_date)]
-    # Разделяем на расходы и доходы
-    expenses_df = filtered_df[filtered_df['Сумма операции'] < 0]
-    income_df = filtered_df[filtered_df['Сумма операции'] > 0]
+
+def process_expenses(dataframe: pd.DataFrame) -> dict[str, Any]:
+    """Сводная статистика расходов в json."""
+    if dataframe.empty:
+        return {"total_amount": 0, "main": [], "transfers_and_cash": []}
+
+    totals = (-dataframe.groupby(CATEGORY_COLUMN)[AMOUNT_COLUMN].sum()).round()
+    top_categories = totals.nlargest(7)
+    other_total = totals.drop(index=top_categories.index, errors="ignore").sum()
+
+    main = [{"category": category, "amount": int(amount)} for category, amount in top_categories.items()]
+    if other_total > 0:
+        main.append({"category": "Остальное", "amount": int(round(other_total))})
+
+    transfers = totals[totals.index.isin(["Наличные", "Переводы"])]
+    transfers_and_cash = [
+        {"category": category, "amount": int(amount)} for category, amount in transfers.items()
+    ]
+    return {"total_amount": int(round(-dataframe[AMOUNT_COLUMN].sum())), "main": main, "transfers_and_cash": transfers_and_cash}
+
+
+def process_income(dataframe: pd.DataFrame) -> dict[str, Any]:
+    """Функция обработки доходов."""
+    if dataframe.empty:
+        return {"total_amount": 0, "main": []}
+
+    totals = dataframe.groupby(CATEGORY_COLUMN)[AMOUNT_COLUMN].sum().round()
+    top_categories = totals.nlargest(3)
+    main = [{"category": category, "amount": int(amount)} for category, amount in top_categories.items()]
+    return {"total_amount": int(round(dataframe[AMOUNT_COLUMN].sum())), "main": main}
+
+
+def get_events_data(date_str: str, period: str = "M") -> dict[str, Any]:
+    """Функция получения данных по событиям."""
+    dataframe = load_excel_data()
+    start_date, end_date = calculate_period(date_str, period)
+    filtered_data = dataframe[(dataframe[DATE_COLUMN] >= start_date) & (dataframe[DATE_COLUMN] <= end_date)]
+
+    expenses_df = filtered_data[filtered_data[AMOUNT_COLUMN] < 0]
+    income_df = filtered_data[filtered_data[AMOUNT_COLUMN] > 0]
     return {
         "expenses": process_expenses(expenses_df),
         "income": process_income(income_df),
         "currency_rates": get_currency_rates(),
-        "stock_prices": get_stock_prices()
+        "stock_prices": get_stock_prices(),
     }

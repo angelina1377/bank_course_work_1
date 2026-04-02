@@ -1,38 +1,38 @@
-from  datetime import datetime  # Импортируем работу с датами
-import pandas as pd  # Импортируем библиотеку для работы с данными
-import logging
+"""Общие полезные функции."""
 
-# Настройка логирования:
+from __future__ import annotations
 
-logging.basicConfig(
+from datetime import datetime
 
-    level=logging.INFO,  # Устанавливаем уровень логирования INFO
-    format='%(asctime)s - %(levelname)s - %(message)s'  # Формат вывода логов
-)
-# Функция валидации даты
-def validate_date(date_str):
-     try:
-         datetime.strpttime(date_str,'%d.%m.%Y') # Пытаемся преобразовать строку в дату
-         return  True # Если успешно, возвращаем True
+import pandas as pd
 
-     except ValueError:
-         return  False # Если ошибка, возвращаем False
 
-# Функция конвертации суммы
-def convert_amount(amount):
-    return round(amount) # Округляет сумму до целого числа
+def validate_date(date_str: str) -> bool:
+    """Функция валидации даты `DD.MM.YYYY` format."""
+    try:
+        datetime.strptime(date_str, "%d.%m.%Y")
+        return True
+    except ValueError:
+        return False
 
-# Функция получения текущей даты
-def get_current_date():
-    return datetime.now().strptime('%d.%m.%Y') # Возвращает текущую дату в формате ДД.ММ.ГГГГ
 
-# Функция фильтрации транзакций
-def filter_transactions(sf, start_date, end_date):
-    return df[
-        (df['Дата операции'] >= start_date) & # фильтрация по дате начала
-        (df['Дата операции'] <= end_date) # Фильтрации по дате конца
+def convert_amount(amount: float) -> int:
+    """Функция конвертации суммы."""
+    return round(amount)
+
+
+def get_current_date() -> str:
+    """Функция получения текущей даты `DD.MM.YYYY` string."""
+    return datetime.now().strftime("%d.%m.%Y")
+
+
+def filter_transactions(dataframe: pd.DataFrame, start_date: datetime, end_date: datetime) -> pd.DataFrame:
+    """Функция фильтрации транзакций."""
+    return dataframe[
+        (dataframe["Дата операции"] >= start_date) & (dataframe["Дата операции"] <= end_date)
     ]
 
-# Функция подсчета общей суммы
-def calculate_total(df):
-    return round(df['Сумма операции'].sum()) # Суммирует все значения в колонке "Сумма операции" и округляет
+
+def calculate_total(dataframe: pd.DataFrame) -> int:
+    """Подсчет общей суммы."""
+    return round(dataframe["Сумма операции"].sum())

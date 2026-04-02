@@ -1,39 +1,35 @@
+
+from __future__ import annotations
+
 import json
-import sys # Импортируем модуль для работы с аргументами командной строки
-from views import get_events_data # Импортируем функцию для загрузки Excel
-from utils import validate_date # Импортируем функцию валидацию даты
+import sys
 
-def main():
-    # Проверяем кол-во аргументов командной строки
+from utils import validate_date
+from views import get_events_data
+
+
+def main() -> int:
+    """Проверяем кол-во аргументов командной строки."""
     if len(sys.argv) < 2:
-        print("Использование: python mail.py дата [период]")
-        sys.exist(1) # Завершаем программу с кодом ошибки
+        print("Использование: python src/main.py <дата> [период]")
+        return 1
 
-    # Получаем дату из аргументов
     date_str = sys.argv[1]
+    period = sys.argv[2] if len(sys.argv) > 2 else "M"
 
-    # Получаем период(по умолчанию "М" - месяц)
-    period = sys.argv[2] if len(sys.argv) > 2 else 'M'
-
-    # Валидируем дату
     if not validate_date(date_str):
         print("Неверный формат даты. Используйте ДД.ММ.ГГГГ")
-        sys.exit(1) # Завершаем программу при ошибке
+        return 1
 
     try:
-        # Получаем данные событий
-        result= get_events_data(date_str, period)
+        result = get_events_data(date_str, period)
+    except Exception as exc:  # pragma: no cover
+        print(f"Произошла ошибка: {exc}")
+        return 1
 
-    # Выводим результат в формате JSON
-    print(json.dumps(
-        result,
-        ensure_ascii= False, # Разрешаем вывод не-ASCII символов
-        indent = 2 # Форматируем JSON с отступами
-    ))
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
 
-    except Exception as e:
-    # Обрабатываем возможные ошибки
-       print(f"Произошла ошибка: {str(e)}")
 
-if __name__ == "__main__"
-    main() # Запускаем основную функцию при прямом запуске скрипта
+if __name__ == "__main__":
+    raise SystemExit(main())
